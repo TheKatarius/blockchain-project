@@ -27,7 +27,7 @@ Content-Type: application/json
 
 {
   "author": "Alice",
-  "content": "Transakcja testowa8"
+  "content": "Transakcja testowa7"
 }
 
 ###
@@ -40,6 +40,16 @@ Content-Type: application/json
 {
   "author": "Bob",
   "content": "Inna transakcja8"
+}
+
+###
+
+POST http://localhost:5002/new_transaction
+Content-Type: application/json
+
+{
+  "author": "Dave",
+  "content": "transakcja8"
 }
 
 ###

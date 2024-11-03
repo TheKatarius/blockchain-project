@@ -1,87 +1,59 @@
-// // src/miner.ts
+// import { EventEmitter } from 'events';
+// import { Blockchain, BlockData } from './blockchain';
 //
-// import axios, { AxiosResponse } from 'axios';
-// import {BlockData} from "./blockchain";
+// export class Miner {
+//     private blockchain: Blockchain;
+//     private isMining: boolean;
+//     private eventEmitter: EventEmitter;
 //
-// export const nodeAddress: string | undefined = process.argv[2];
-// export const peerAddresses: string[] = process.argv.slice(3);
+//     constructor(blockchain: Blockchain, eventEmitter: EventEmitter) {
+//         this.blockchain = blockchain;
+//         this.isMining = false;
+//         this.eventEmitter = eventEmitter;
 //
-// if (!nodeAddress) {
-//     console.log('Użycie: node miner.js <NODE_ADDRESS> [PEER_ADDRESS1 PEER_ADDRESS2 ...]');
-//     process.exit(1);
+//         // Nasłuchiwanie na zdarzenia
+//         this.eventEmitter.on('startMining', this.startMining.bind(this));
+//         this.eventEmitter.on('stopMining', this.stopMining.bind(this));
+//     }
+//
+//     private async startMining() {
+//         if (this.isMining) {
+//             console.log('Kopanie już jest w toku.');
+//             return;
+//         }
+//         this.isMining = true;
+//         console.log('Rozpoczynam kopanie...');
+//
+//         while (this.isMining) {
+//             try {
+//                 const result = this.blockchain.mine();
+//                 if (result) {
+//                     const newBlock = this.blockchain.getLastBlock();
+//
+//                     // Broadcast nowego bloku
+//                     const blockToBroadcast: BlockData = { ...newBlock.toDict(), hash: newBlock.hash };
+//                     console.log(`Blok #${result} został wykopany i rozesłany.`);
+//                     await broadcastBlock(blockToBroadcast);
+//
+//                     // Kontynuuj kopanie kolejnego bloku
+//                     console.log('Kontynuuję kopanie kolejnego bloku...');
+//                 } else {
+//                     console.log('Brak transakcji do kopania. Oczekuję na nowe transakcje...');
+//                     // Czekaj przed kolejną próbą kopania
+//                     await new Promise(resolve => setTimeout(resolve, 5000));
+//                 }
+//             } catch (error: any) {
+//                 console.error(`Błąd podczas kopania: ${error.message}`);
+//             }
+//         }
+//     }
+//
+//     private stopMining() {
+//         if (!this.isMining) {
+//             console.log('Kopanie nie jest w toku.');
+//             return;
+//         }
+//         this.isMining = false;
+//         console.log('Kopanie zostało zatrzymane.');
+//     }
 // }
-//
-// let shouldMine: boolean = true; // Flaga kontrolująca kopanie
-//
-// // Rejestracja węzła u peerów
-// const registerWithPeers = async (): Promise<void> => {
-//     for (const peer of peerAddresses) {
-//         try {
-//             await axios.post(`${peer}/register_node`, { node_address: nodeAddress });
-//             console.log(`Zarejestrowano node'a w peer ${peer}`);
-//         } catch (error: any) {
-//             console.log(`Nie można zarejestrować node'a w peer ${peer}: ${error.message}`);
-//         }
-//     }
-// };
-//
-// // Funkcja do sprawdzania najnowszego bloku
-// const getLatestBlock = async (): Promise<number> => {
-//     try {
-//         const response: AxiosResponse = await axios.get(`${nodeAddress}/chain`);
-//         const chain: BlockData[] = response.data;
-//         if (chain.length === 0) return 0;
-//         return chain[chain.length - 1].index;
-//     } catch (error: any) {
-//         console.log(`Błąd podczas pobierania łańcucha: ${error.message}`);
-//         return 0;
-//     }
-// };
-//
-// const mine = async (): Promise<void> => {
-//     while (shouldMine) {
-//         try {
-//             const response: AxiosResponse = await axios.get(`${nodeAddress}/mine`);
-//             console.log(response.data.message);
-//             if (response.data.success) {
-//                 console.log('Nowy blok został dodany. Restartowanie kopania za 10 sekund.');
-//                 // Poczekaj 10 sekund przed ponownym rozpoczęciem kopania
-//                 await new Promise(resolve => setTimeout(resolve, 10000));
-//             }
-//         } catch (error: any) {
-//             // Sprawdź, czy błąd wynika z konfliktu
-//             if (error.response && error.response.status === 400) {
-//                 console.log('Blok z tym samym indeksem został już dodany. Przerywam kopanie.');
-//                 shouldMine = false;
-//             } else {
-//                 console.log(`Błąd podczas kopania: ${error.message}`);
-//             }
-//         }
-//         await new Promise(resolve => setTimeout(resolve, 10000)); // Czekaj 10 sekund przed kolejną próbą
-//     }
-// };
-//
-// // Funkcja monitorująca najnowszy blok
-// const monitorChain = async (): Promise<void> => {
-//     let lastBlockIndex = await getLatestBlock();
-//     while (shouldMine) {
-//         const currentBlockIndex = await getLatestBlock();
-//         if (currentBlockIndex > lastBlockIndex) {
-//             console.log('Wykryto nowy blok. Przerywam kopanie.');
-//             // shouldMine = false;
-//             break;
-//         }
-//         lastBlockIndex = currentBlockIndex;
-//         await new Promise(resolve => setTimeout(resolve, 5000)); // Sprawdzaj co 5 sekund
-//     }
-// };
-//
-// // Uruchomienie procesów
-// const start = async () => {
-//     await registerWithPeers();
-//     // Uruchomienie kopania i monitorowania w równoległych procesach
-//     mine();
-//     monitorChain();
-// };
-//
-// start();

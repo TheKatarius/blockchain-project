@@ -21,10 +21,10 @@ export class Blockchain {
     processedTransactions: Set<string>;
     processedBlocks: Set<string>;
 
-    constructor() { // Domyślna trudność to 5
+    constructor(difficulty: number = 6) { // Domyślna trudność to 5
         this.chain = [];
         this.unconfirmedTransactions = [];
-        this.difficulty = 5;
+        this.difficulty = difficulty;
 
         this.processedTransactions = new Set<string>();
         this.processedBlocks = new Set<string>();
@@ -63,12 +63,12 @@ export class Blockchain {
         while (!computedHash.startsWith(target)) {
             block.nonce += 1;
             // Log nonce co 1000 iteracji to avoid flooding logs
-            if (block.nonce % 1000 === 0) {
-                console.log('Nonce:', block.nonce);
-            }
+            // if (block.nonce % 1000 === 0) {
+            //     console.log('Nonce:', block.nonce);
+            // }
             computedHash = block.computeHash();
         }
-        console.log('Nonce:', block.nonce);
+        console.log('Nonce znaleziony:', block.nonce);
         return computedHash;
     }
 
@@ -118,9 +118,11 @@ export class Blockchain {
 
     mine(): number | false {
         if (this.unconfirmedTransactions.length === 0) {
+            console.log('Brak transakcji do zatwierdzenia.');
             return false;
         }
 
+        console.log('Rozpoczynam kopanie nowego bloku...');
         const lastBlock = this.getLastBlock();
         const newBlock = new Block(
             lastBlock.index + 1,
@@ -130,9 +132,11 @@ export class Blockchain {
         const proof = this.proofOfWork(newBlock);
 
         if (this.addBlock(newBlock, proof)) {
+            console.log(`Blok #${newBlock.index} został pomyślnie dodany do łańcucha.`);
             this.unconfirmedTransactions = [];
             return newBlock.index;
         }
+        console.log('Dodanie bloku do łańcucha nie powiodło się.');
         return false;
     }
 
@@ -235,11 +239,32 @@ export class Blockchain {
                     });
                     return block;
                 });
-                console.log('Łańcuch został zastąpiony nowym, dłuższym łańcuchem.');
+                console.log('Łańcuch został zastąpiony nowym, dłuższym łańcuchem albo łańcuchem, które ostatni blok ma mniejszy hash.');
                 return true;
             }
         }
 
         return false;
+    }
+
+    // Metoda do sprawdzania, czy transakcja została przetworzona
+    isTransactionProcessed(transaction: Transaction): boolean {
+        const txHash = this.computeTransactionHash(transaction);
+        return this.processedTransactions.has(txHash);
+    }
+
+    // Nowa Metoda do Pobierania Listy Użytkowników
+    getUsers(): string[] {
+        const usersSet = new Set<string>();
+        this.chain.forEach(block => {
+            block.transactions.forEach(tx => {
+                usersSet.add(tx.author);
+            });
+        });
+        // Opcjonalnie, można dodać autorów z unconfirmedTransactions
+        this.unconfirmedTransactions.forEach(tx => {
+            usersSet.add(tx.author);
+        });
+        return Array.from(usersSet);
     }
 }

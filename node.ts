@@ -5,6 +5,10 @@ import bodyParser from 'body-parser';
 import axios, { AxiosResponse } from 'axios';
 import { Blockchain, BlockData } from './blockchain';
 import { Block, Transaction } from './block';
+import { EventEmitter } from 'events';
+
+// Utworzenie instancji EventEmitter
+const eventEmitter = new EventEmitter();
 
 // Ustawienie serwera Express
 const app: Application = express();
@@ -17,8 +21,9 @@ const initialPeerAddresses: string[] = process.argv.slice(3);
 // Zdefiniowanie adresu node na podstawie PORT
 const nodeAddress: string = `http://localhost:${PORT}`;
 
-// Inicjalizacja Blockchain
-const blockchain = new Blockchain();
+// Inicjalizacja Blockchain z określoną trudnością
+const DIFFICULTY: number = 5; // Możesz zmienić wartość trudności
+const blockchain = new Blockchain(DIFFICULTY);
 const peers: Set<string> = new Set();
 
 // Dodanie początkowych peerów, jeśli zostały podane
@@ -28,19 +33,8 @@ initialPeerAddresses.forEach(peer => {
     }
 });
 
-// Flaga kontrolująca kopanie
-let shouldMine: boolean = true;
-
-// Funkcja do sprawdzania, czy transakcja została już przetworzona
-const isTransactionProcessed = (transaction: Transaction): boolean => {
-    const txHash = blockchain.computeTransactionHash(transaction);
-    return blockchain.processedTransactions.has(txHash);
-};
-
-// Funkcja do sprawdzania, czy blok został już przetworzony
-const isBlockProcessed = (block: Block): boolean => {
-    return blockchain.processedBlocks.has(block.hash);
-};
+// Flagi kontrolujące kopanie
+let miningInProgress: boolean = false;
 
 // Handler dla nowych transakcji
 const newTransactionHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
@@ -53,7 +47,7 @@ const newTransactionHandler: RequestHandler = async (req: Request, res: Response
     }
 
     // Sprawdzenie, czy transakcja została już przetworzona
-    if (isTransactionProcessed(transaction)) {
+    if (blockchain.isTransactionProcessed(transaction)) {
         console.log('Transakcja już została przetworzona, pomijam broadcast.');
         res.status(200).send('Transakcja już została przetworzona');
         return;
@@ -61,6 +55,15 @@ const newTransactionHandler: RequestHandler = async (req: Request, res: Response
 
     blockchain.addTransaction(transaction);
     await broadcastTransaction(transaction);
+
+    // Emitowanie zdarzenia nowej transakcji
+    eventEmitter.emit('newTransaction');
+
+    // Rozpoczęcie kopania, jeśli nie trwa
+    if (!miningInProgress) {
+        startMining();
+    }
+
     res.status(201).send('Transakcja dodana');
 };
 app.post('/new_transaction', newTransactionHandler);
@@ -87,6 +90,7 @@ const registerNodeHandler: RequestHandler = async (req: Request, res: Response):
 
     if (!peers.has(newNodeAddress)) {
         peers.add(newNodeAddress);
+        console.log('Peers:', peers);
         console.log(`Nowy node zarejestrowany: ${newNodeAddress}`);
         await broadcastNewNode(newNodeAddress);
     } else {
@@ -103,9 +107,10 @@ const addBlockHandler: RequestHandler = async (req: Request, res: Response): Pro
         console.log('Otrzymano żądanie /add_block:', req.body);
         const blockData: BlockData = req.body;
 
+        console.log(blockchain.processedBlocks)
         // Sprawdzenie, czy blok został już przetworzony
         if (blockchain.processedBlocks.has(blockData.hash)) {
-            console.log('Blok już został przetworzony, pomijam broadcast.');
+            console.log('Blok już został przetworzony, pomijam.');
             res.status(200).send('Blok już został przetworzony');
             return;
         }
@@ -126,9 +131,12 @@ const addBlockHandler: RequestHandler = async (req: Request, res: Response): Pro
             if (resolved) {
                 console.log('Łańcuch został zastąpiony po konflikcie.');
                 res.status(201).send('Łańcuch został zastąpiony');
+
+                // Emitowanie zdarzenia nowego bloku
+                eventEmitter.emit('newBlock');
                 return;
             } else {
-                console.log('Blok odrzucony ze względu na konflikt.');
+                console.log('Blok odrzucony po uwzględnieniu rozwiązywania konfliktów.');
                 res.status(400).send('Blok odrzucony');
                 return;
             }
@@ -139,6 +147,9 @@ const addBlockHandler: RequestHandler = async (req: Request, res: Response): Pro
 
             await broadcastBlock(blockToBroadcast);
             res.status(201).send('Blok dodany do łańcucha');
+
+            // Emitowanie zdarzenia nowego bloku
+            eventEmitter.emit('newBlock');
         }
     } catch (error: any) {
         console.error('Błąd podczas przetwarzania /add_block:', error);
@@ -147,42 +158,15 @@ const addBlockHandler: RequestHandler = async (req: Request, res: Response): Pro
 };
 app.post('/add_block', addBlockHandler);
 
-// Handler do kopania nowego bloku
-const mineHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const result: number | false = blockchain.mine();
-        if (result) {
-            const newBlock = blockchain.getLastBlock();
-
-            // Broadcast nowego bloku
-            const blockToBroadcast: BlockData = { ...newBlock.toDict(), hash: newBlock.hash };
-            console.log(`Blok #${result} został dodany do łańcucha i broadcastowany.`);
-            await broadcastBlock(blockToBroadcast);
-
-            res.status(200).json({
-                success: true,
-                message: `Blok #${result} został dodany do łańcucha`
-            });
-        } else {
-            res.status(200).json({
-                success: false,
-                message: 'Brak transakcji do zatwierdzenia'
-            });
-        }
-    } catch (error: any) {
-        console.error(`Błąd podczas kopania: ${error.message}`);
-        res.status(500).send('Błąd podczas kopania');
-    }
-};
-app.get('/mine', mineHandler);
-
 // Funkcja do broadcastowania transakcji do wszystkich peerów
 const broadcastTransaction = async (transaction: Transaction): Promise<void> => {
     const broadcastPromises = Array.from(peers).map(async (peer) => {
         try {
-            // Opcjonalnie, unikaj wysyłania transakcji do peer'a, który ją wysłał
-            await axios.post(`${peer}/new_transaction`, transaction);
-            console.log(`Transakcja broadcastowana do peer ${peer}`);
+            // Unikaj wysyłania transakcji do samego siebie
+            if (peer !== nodeAddress) {
+                await axios.post(`${peer}/new_transaction`, transaction);
+                console.log(`Transakcja broadcastowana do peer ${peer}`);
+            }
         } catch (error: any) {
             console.log(`Nie można wysłać transakcji do peer ${peer}: ${error.message}`);
         }
@@ -191,27 +175,43 @@ const broadcastTransaction = async (transaction: Transaction): Promise<void> => 
     await Promise.all(broadcastPromises);
 };
 
-// Funkcja do broadcastowania bloku do wszystkich peerów
-const broadcastBlock = async (block: BlockData): Promise<void> => {
-    const broadcastPromises = Array.from(peers).map(async (peer) => {
+const sendBlockToPeer = async (peer: string, block: BlockData): Promise<void> => {
+    while (true) {
         try {
-            // Opcjonalnie, unikaj wysyłania bloku do peer'a, który go wysłał
             await axios.post(`${peer}/add_block`, block);
             console.log(`Blok broadcastowany do peer ${peer}`);
+            break; // Wyjdź z pętli, jeśli wysyłka się powiodła
         } catch (error: any) {
-            console.log(`Nie można wysłać bloku do peer ${peer}: ${error.message}`);
+            if(error.status === 400) {
+                console.log(`Blok został już przetworzony przez peer i rozwiązał konflikty ${peer}`);
+                break;
+            }
+            console.log(`Nie można wysłać bloku do peer ${peer}: ${error.message}. Retrying in 1 second...`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Poczekaj 1 sekundę przed ponowną próbą
+        }
+    }
+};
+
+// Funkcja do broadcastowania bloku do wszystkich peerów
+const broadcastBlock = async (block: BlockData): Promise<void> => {
+    console.log('Peers:', peers);
+
+    const broadcastPromises = Array.from(peers).map(async (peer) => {
+        if (peer !== nodeAddress) { // Unikaj wysyłania bloku do samego siebie
+            await sendBlockToPeer(peer, block);
         }
     });
 
     await Promise.all(broadcastPromises);
 };
 
+
 // Funkcja do broadcastowania nowego node'a do wszystkich peerów
 const broadcastNewNode = async (newNodeAddress: string): Promise<void> => {
     const broadcastPromises = Array.from(peers).map(async (peer) => {
         try {
             // Unikaj broadcastowania do samego siebie
-            if (peer !== newNodeAddress) {
+            if (peer !== newNodeAddress && peer !== nodeAddress) {
                 await axios.post(`${peer}/register_node`, { node_address: newNodeAddress });
                 console.log(`Nowy node broadcastowany do peer ${peer}`);
             }
@@ -223,60 +223,90 @@ const broadcastNewNode = async (newNodeAddress: string): Promise<void> => {
     await Promise.all(broadcastPromises);
 };
 
-// Funkcja do sprawdzania najnowszego bloku
-const getLatestBlock = async (): Promise<number> => {
-    try {
-        const response: AxiosResponse = await axios.get(`${nodeAddress}/chain`);
-        const chain: BlockData[] = response.data;
-        if (chain.length === 0) return 0;
-        return chain[chain.length - 1].index;
-    } catch (error: any) {
-        console.log(`Błąd podczas pobierania łańcucha: ${error.message}`);
-        return 0;
-    }
-};
-
 // Funkcja kopiąca
 const startMining = async (): Promise<void> => {
-    while (shouldMine) {
-        try {
-            const response: AxiosResponse = await axios.get(`${nodeAddress}/mine`);
-            console.log(response.data.message);
-            if (response.data.success) {
-                console.log('Nowy blok został dodany. Restartowanie kopania za 10 sekund.');
-                // Poczekaj 10 sekund przed ponownym rozpoczęciem kopania
-                await new Promise(resolve => setTimeout(resolve, 10000));
+    if (miningInProgress) {
+        console.log('Kopanie już trwa.');
+        return;
+    }
+    miningInProgress = true;
+
+    try {
+        console.log('Rozpoczynam kopanie nowego bloku...');
+
+        while (blockchain.unconfirmedTransactions.length > 0) {
+            const lastBlock = blockchain.getLastBlock();
+            const newBlock = new Block(
+                lastBlock.index + 1,
+                blockchain.unconfirmedTransactions.slice(),
+                lastBlock.hash
+            );
+
+            let miningInterrupted = false;
+
+            // Funkcja obsługująca przerwanie kopania
+            const onMiningInterrupted = () => {
+                miningInterrupted = true;
+            };
+
+            eventEmitter.once('newBlock', onMiningInterrupted);
+            eventEmitter.once('newTransaction', onMiningInterrupted);
+
+            const proof = await proofOfWorkAsync(newBlock, () => miningInterrupted);
+
+            eventEmitter.off('newBlock', onMiningInterrupted);
+            eventEmitter.off('newTransaction', onMiningInterrupted);
+
+            if (miningInterrupted) {
+                console.log('Kopanie przerwane. Restart kopania z nowymi danymi.');
+                continue; // Restart kopania z nowymi transakcjami
             }
-        } catch (error: any) {
-            // Sprawdź, czy błąd wynika z konfliktu
-            if (error.response && error.response.status === 400) {
-                console.log('Blok z tym samym indeksem został już dodany. Przerywam kopanie.');
-                shouldMine = false;
+
+            if (proof && blockchain.addBlock(newBlock, proof)) {
+                console.log(`Blok #${newBlock.index} został pomyślnie dodany do łańcucha.`);
+
+                // Broadcast nowego bloku
+                const blockToBroadcast: BlockData = { ...newBlock.toDict(), hash: newBlock.hash };
+                console.log(`Blok #${newBlock.index} został dodany do łańcucha i broadcastowany.`);
+                await broadcastBlock(blockToBroadcast);
+
+                // Emitowanie zdarzenia nowego bloku
+                eventEmitter.emit('newBlock');
             } else {
-                console.log(`Błąd podczas kopania: ${error.message}`);
+                console.log('Dodanie bloku do łańcucha nie powiodło się.');
             }
         }
-        await new Promise(resolve => setTimeout(resolve, 10000)); // Czekaj 10 sekund przed kolejną próbą
+    } catch (error: any) {
+        console.log(`Błąd podczas kopania: ${error.message}`);
     }
+
+    miningInProgress = false;
 };
 
-// Funkcja monitorująca najnowszy blok
-const monitorChain = async (): Promise<void> => {
-    let lastBlockIndex = await getLatestBlock();
-    while (shouldMine) {
-        const currentBlockIndex = await getLatestBlock();
-        if (currentBlockIndex > lastBlockIndex) {
-            console.log('Wykryto nowy blok. Przerywam kopanie.');
-            // shouldMine = false;
-            break;
+// Funkcja proofOfWorkAsync
+const proofOfWorkAsync = async (block: Block, stopMining: () => boolean): Promise<string | null> => {
+    block.nonce = 0;
+    let computedHash = block.computeHash();
+    const target = '0'.repeat(blockchain.difficulty);
+    while (!computedHash.startsWith(target)) {
+        if (stopMining()) {
+            return null; // Kopanie zostało przerwane
         }
-        lastBlockIndex = currentBlockIndex;
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Sprawdzaj co 5 sekund
+        block.nonce += 1;
+        // if (block.nonce % 1000 === 0) {
+        //     // console.log('Nonce:', block.nonce);
+        //     // Dodaj małe opóźnienie, aby nie blokować event loopa
+        //     await new Promise(resolve => setImmediate(resolve));
+        // }
+        computedHash = block.computeHash();
     }
+    console.log('Nonce znaleziony:', block.nonce);
+    return computedHash;
 };
 
 // Funkcja do rejestracji u wszystkich peerów początkowych
 const registerWithPeers = async (): Promise<void> => {
+    console.log('Peers:', initialPeerAddresses);
     for (const peer of initialPeerAddresses) {
         if (peer !== nodeAddress) { // Unikaj rejestracji samego siebie
             try {
@@ -289,17 +319,59 @@ const registerWithPeers = async (): Promise<void> => {
     }
 };
 
-// Funkcja do uruchomienia kopania i monitorowania
-const startMiningAndMonitoring = async (): Promise<void> => {
-    startMining();
-    monitorChain();
+// Handler do aktualizacji listy aktywnych minerów
+const updateActiveMinersHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
+    const newActiveMiners: string[] = req.body.activeMiners;
+    if (!newActiveMiners || !Array.isArray(newActiveMiners)) {
+        res.status(400).send('Nieprawidłowe dane aktywnych minerów');
+        return;
+    }
+
+    newActiveMiners.forEach(miner => {
+        if (miner !== nodeAddress) { // Unikaj dodawania samego siebie
+            peers.add(miner);
+        }
+    });
+    console.log('Aktualizacja listy aktywnych minerów:', peers);
+
+    res.status(200).send('Lista aktywnych minerów zaktualizowana');
 };
+app.post('/active_miners', updateActiveMinersHandler);
+
+// Funkcja do broadcastowania aktywnych minerów do wszystkich peerów
+const broadcastActiveMiners = async (): Promise<void> => {
+    const broadcastPromises = Array.from(peers).map(async (peer) => {
+        try {
+            // Unikaj wysyłania do samego siebie
+            if (peer !== nodeAddress) {
+                await axios.post(`${peer}/active_miners`, { activeMiners: Array.from(peers) });
+            }
+        } catch (error: any) {
+            console.log(`Nie można broadcastować aktywnych minerów do peer ${peer}: ${error.message}`);
+        }
+    });
+
+    await Promise.all(broadcastPromises);
+};
+
+// Harmonogram synchronizacji co 10 sekund
+const scheduleActiveMinersSynchronization = () => {
+    setInterval(async () => {
+        await broadcastActiveMiners();
+    }, 10000); // 10 000 ms = 10 sekund
+};
+
 
 // Uruchomienie serwera i minera
 const start = async () => {
     await registerWithPeers();
-    // Uruchomienie kopania i monitorowania w równoległych procesach
-    startMiningAndMonitoring();
+
+    // Jeśli są niepotwierdzone transakcje, rozpocznij kopanie
+    if (blockchain.unconfirmedTransactions.length > 0) {
+        startMining();
+    }
+
+    scheduleActiveMinersSynchronization();
 };
 
 start();
