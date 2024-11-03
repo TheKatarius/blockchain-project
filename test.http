@@ -1,0 +1,130 @@
+### 1. Rejestracja Node 2 w Node 1
+
+POST http://localhost:5000/register_node
+Content-Type: application/json
+
+{
+  "node_address": "http://localhost:5001"
+}
+
+###
+
+### 2. Rejestracja Node 1 w Node 2
+
+POST http://localhost:5001/register_node
+Content-Type: application/json
+
+{
+  "node_address": "http://localhost:5000"
+}
+
+###
+
+### 3. Dodawanie Transakcji do Node 1
+
+POST http://localhost:5000/new_transaction
+Content-Type: application/json
+
+{
+  "author": "Alice",
+  "content": "Transakcja testowa8"
+}
+
+###
+
+### 4. Dodawanie Transakcji do Node 2
+
+POST http://localhost:5001/new_transaction
+Content-Type: application/json
+
+{
+  "author": "Bob",
+  "content": "Inna transakcja8"
+}
+
+###
+
+### 5. Uruchomienie Procesu Miningowego na Node 1
+
+GET http://localhost:5000/mine
+
+###
+
+### 6. Uruchomienie Procesu Miningowego na Node 2
+
+GET http://localhost:5001/mine
+
+###
+
+### 7. Pobieranie Łańcucha Bloków z Node 1
+
+GET http://localhost:5000/chain
+
+###
+
+### 8. Pobieranie Łańcucha Bloków z Node 2
+
+GET http://localhost:5001/chain
+
+###
+
+### 9. Dodawanie Bloku Ręcznie do Node 1 (Przykład)
+
+POST http://localhost:5000/add_block
+Content-Type: application/json
+
+{
+  "index": 1,
+  "timestamp": 1701364800000,
+  "transactions": [
+    {
+      "author": "Charlie",
+      "content": "Kolejna transakcja"
+    }
+  ],
+  "previousHash": "0",
+  "nonce": 1000,
+  "hash": "0000abcd1234ef567890abcdef1234567890abcdef1234567890abcdef123456"
+}
+
+###
+
+### 10. Symulacja Konfliktu: Dodawanie Równoczesnych Transakcji do Obu Node'ów
+
+#### 10.1. Dodaj Transakcję do Node 1
+
+POST http://localhost:5000/new_transaction
+Content-Type: application/json
+
+{
+  "author": "Dave",
+  "content": "Transakcja z Node 1"
+}
+
+###
+
+#### 10.2. Dodaj Transakcję do Node 2
+
+POST http://localhost:5001/new_transaction
+Content-Type: application/json
+
+{
+  "author": "Eve",
+  "content": "Transakcja z Node 2"
+}
+
+###
+
+### 11. Sprawdzanie Aktualnego Łańcucha Bloków na Obu Node'ach
+
+#### 11.1. Node 1
+
+GET http://localhost:5000/chain
+
+###
+
+#### 11.2. Node 2
+
+GET http://localhost:5001/chain
+
+###
