@@ -62,11 +62,16 @@ GET http://localhost:5000/chain
 
 ###
 
-### 8. Pobieranie Łańcucha Bloków z Node 2
-
 GET http://localhost:5001/chain
 
 ###
+
+GET http://localhost:5002/chain
+
+###
+
+GET http://localhost:5003/chain
+
 
 ### 9. Dodawanie Bloku Ręcznie do Node 1 (Przykład)
 

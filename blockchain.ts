@@ -2,7 +2,7 @@
 
 import { Block, Transaction } from './block';
 import * as crypto from 'crypto';
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 
 export interface BlockData {
     index: number;
@@ -21,10 +21,10 @@ export class Blockchain {
     processedTransactions: Set<string>;
     processedBlocks: Set<string>;
 
-    constructor(difficulty: number) { // Domyślna trudność to 5
+    constructor() { // Domyślna trudność to 5
         this.chain = [];
         this.unconfirmedTransactions = [];
-        this.difficulty = difficulty;
+        this.difficulty = 5;
 
         this.processedTransactions = new Set<string>();
         this.processedBlocks = new Set<string>();
@@ -62,7 +62,8 @@ export class Blockchain {
         const target = '0'.repeat(this.difficulty);
         while (!computedHash.startsWith(target)) {
             block.nonce += 1;
-            if(block.nonce / 1000 === 0) {
+            // Log nonce co 1000 iteracji to avoid flooding logs
+            if (block.nonce % 1000 === 0) {
                 console.log('Nonce:', block.nonce);
             }
             computedHash = block.computeHash();
@@ -79,7 +80,7 @@ export class Blockchain {
             return false;
         }
 
-        // Sprawdź, czy blok z tym samym previousHash już istnieje
+        // Sprawdzenie, czy blok z tym samym previousHash już istnieje
         const existingBlock = this.chain.find(b => b.previousHash === block.previousHash && b.hash !== block.hash);
         if (existingBlock) {
             console.log('Blok z tym poprzednim hashem już istnieje');
@@ -96,15 +97,13 @@ export class Blockchain {
         console.log('Dodano nowy blok:', block.toDict());
         this.processedBlocks.add(block.hash);
 
-        // Dodaj transakcje do processedTransactions i usuń je z unconfirmedTransactions
+        // Dodanie transakcji do processedTransactions i usunięcie ich z unconfirmedTransactions
         block.transactions.forEach(tx => {
             const txHash = this.computeTransactionHash(tx);
             this.processedTransactions.add(txHash);
-            // Usuń transakcję z unconfirmedTransactions, jeśli istnieje
+            // Usunięcie transakcji z unconfirmedTransactions, jeśli istnieje
             this.unconfirmedTransactions = this.unconfirmedTransactions.filter(utx => this.computeTransactionHash(utx) !== txHash);
         });
-
-        // this.processedTransactions.clear();
 
         return true;
     }
@@ -187,7 +186,7 @@ export class Blockchain {
 
         for (const peer of peers) {
             try {
-                const response = await axios.get<BlockData[]>(`${peer}/chain`);
+                const response: AxiosResponse = await axios.get<BlockData[]>(`${peer}/chain`);
                 const chain = response.data;
                 if (this.isValidChain(chain)) {
                     const currentChainLength = chain.length;
@@ -231,11 +230,12 @@ export class Blockchain {
                     block.transactions.forEach(tx => {
                         const txHash = this.computeTransactionHash(tx);
                         this.processedTransactions.add(txHash);
-                        // Usuń transakcję z unconfirmedTransactions, jeśli istnieje
+                        // Usunięcie transakcji z unconfirmedTransactions, jeśli istnieje
                         this.unconfirmedTransactions = this.unconfirmedTransactions.filter(utx => this.computeTransactionHash(utx) !== txHash);
                     });
                     return block;
                 });
+                console.log('Łańcuch został zastąpiony nowym, dłuższym łańcuchem.');
                 return true;
             }
         }
