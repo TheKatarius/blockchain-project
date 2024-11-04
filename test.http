@@ -27,7 +27,7 @@ Content-Type: application/json
 
 {
   "author": "Alice",
-  "content": "Transakcja testowaq"
+  "content": "Transakcja testowa1"
 }
 
 ###
@@ -39,7 +39,7 @@ Content-Type: application/json
 
 {
   "author": "Bob",
-  "content": "Inna transakcja5"
+  "content": "Inna transakcja1"
 }
 
 ###
