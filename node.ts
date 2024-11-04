@@ -22,7 +22,7 @@ const initialPeerAddresses: string[] = process.argv.slice(3);
 const nodeAddress: string = `http://localhost:${PORT}`;
 
 // Inicjalizacja Blockchain z określoną trudnością
-const DIFFICULTY: number = 5; // Możesz zmienić wartość trudności
+const DIFFICULTY: number = 6; // Możesz zmienić wartość trudności
 const blockchain = new Blockchain(DIFFICULTY);
 const peers: Set<string> = new Set();
 
@@ -93,11 +93,20 @@ const registerNodeHandler: RequestHandler = async (req: Request, res: Response):
         console.log('Peers:', peers);
         console.log(`Nowy node zarejestrowany: ${newNodeAddress}`);
         await broadcastNewNode(newNodeAddress);
+
+        if(blockchain.getChain().length > 1) {
+            try {
+                await axios.post(`${newNodeAddress}/replace_chain`, { newChain: blockchain.getChain() });
+                console.log(`Wysłano łańcuch do nowego node'a ${newNodeAddress}`);
+            } catch (error: any) {
+                console.log(`Nie można wysłać łańcucha do nowego node'a ${newNodeAddress}: ${error.message}`);
+            }
+        }
     } else {
         console.log(`Node ${newNodeAddress} już jest zarejestrowany`);
     }
 
-    res.json(blockchain.getChain());
+    res.json({ chain: blockchain.getChain() }); // Upewnij się, że zwracasz łańcuch w odpowiednim formacie
 };
 app.post('/register_node', registerNodeHandler);
 
@@ -317,6 +326,46 @@ const registerWithPeers = async (): Promise<void> => {
             }
         }
     }
+};
+
+// Handler do zastępowania łańcucha bloków
+const replaceChainHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
+    const newChain: BlockData[] = req.body.newChain;
+
+    // Weryfikacja, czy nowy łańcuch został przesłany i jest tablicą
+    if (!newChain || !Array.isArray(newChain)) {
+        res.status(400).send('Nieprawidłowy nowy łańcuch');
+        return;
+    }
+
+    // Sprawdzenie, czy nowy łańcuch jest ważny i dłuższy niż lokalny łańcuch
+    if (blockchain.isValidChain(newChain) && newChain.length > blockchain.chain.length) {
+        blockchain.replaceChain(newChain); // Upewnij się, że metoda replaceChain istnieje w klasie Blockchain
+        console.log('Lokalny łańcuch został zastąpiony nowym, dłuższym łańcuchem.');
+
+        // Broadcastowanie nowego łańcucha do peerów
+        await broadcastChain();
+
+        res.status(200).send('Łańcuch został zastąpiony');
+    } else {
+        res.status(400).send('Nowy łańcuch jest nieprawidłowy lub krótszy');
+    }
+};
+app.post('/replace_chain', replaceChainHandler);
+
+// Funkcja do broadcastowania całego łańcucha bloków do wszystkich peerów
+const broadcastChain = async (): Promise<void> => {
+    const chain = blockchain.getChain(); // Pobranie całego łańcucha bloków
+    const broadcastPromises = Array.from(peers).map(async (peer) => {
+        try {
+            await axios.post(`${peer}/replace_chain`, { newChain: chain });
+            console.log(`Łańcuch broadcastowany do peer ${peer}`);
+        } catch (error: any) {
+            console.log(`Nie można broadcastować łańcucha do peer ${peer}: ${error.message}`);
+        }
+    });
+
+    await Promise.all(broadcastPromises);
 };
 
 // Handler do aktualizacji listy aktywnych minerów

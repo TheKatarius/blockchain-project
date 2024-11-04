@@ -1,5 +1,3 @@
-// src/blockchain.ts
-
 import { Block, Transaction } from './block';
 import * as crypto from 'crypto';
 import axios, { AxiosResponse } from 'axios';
@@ -253,18 +251,31 @@ export class Blockchain {
         return this.processedTransactions.has(txHash);
     }
 
-    // Nowa Metoda do Pobierania Listy Użytkowników
-    getUsers(): string[] {
-        const usersSet = new Set<string>();
-        this.chain.forEach(block => {
-            block.transactions.forEach(tx => {
-                usersSet.add(tx.author);
+    // W klasie Blockchain
+    replaceChain(newChain: BlockData[]): void {
+        if (this.isValidChain(newChain) && newChain.length > this.chain.length) {
+            this.chain = newChain.map(blockData => {
+                const block = new Block(
+                    blockData.index,
+                    blockData.transactions,
+                    blockData.previousHash,
+                    blockData.nonce,
+                    blockData.timestamp
+                );
+                block.hash = blockData.hash;
+                this.processedBlocks.add(block.hash);
+                // Aktualizacja przetworzonych transakcji
+                block.transactions.forEach(tx => {
+                    const txHash = this.computeTransactionHash(tx);
+                    this.processedTransactions.add(txHash);
+                    // Usunięcie transakcji z listy oczekujących, jeśli istnieje
+                    this.unconfirmedTransactions = this.unconfirmedTransactions.filter(utx => this.computeTransactionHash(utx) !== txHash);
+                });
+                return block;
             });
-        });
-        // Opcjonalnie, można dodać autorów z unconfirmedTransactions
-        this.unconfirmedTransactions.forEach(tx => {
-            usersSet.add(tx.author);
-        });
-        return Array.from(usersSet);
+            console.log('Łańcuch został pomyślnie zastąpiony nowym łańcuchem.');
+        } else {
+            console.log('Nie można zastąpić lokalnego łańcucha - nowy łańcuch jest nieprawidłowy lub krótszy.');
+        }
     }
 }
